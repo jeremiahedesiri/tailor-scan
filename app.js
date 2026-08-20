@@ -3,13 +3,30 @@ const measurements = [
   ['neck','Neck circumference','upper',14.5], ['armhole','Armhole','upper',17], ['bicep','Bicep','upper',12], ['elbow','Elbow','upper',10.5], ['wrist','Wrist','upper',6.5], ['sleeve','Sleeve length','upper',23],
   ['inseam','Inseam','lower',29], ['outseam','Outseam','lower',40], ['thigh','Thigh','lower',22], ['knee','Knee','lower',15], ['calf','Calf','lower',14.5], ['ankle','Ankle','lower',9]
 ];
-const state = { values: Object.fromEntries(measurements.map(([key,, ,value]) => [key, value])), captures: {}, skippedCapture: {}, stream: null, activeGroup: 'core' };
+const baseValues = Object.fromEntries(measurements.map(([key,, ,value]) => [key, value]));
+const state = { values: {...baseValues}, references: { height: 66, chest: 36, hip: 39 }, captures: {}, skippedCapture: {}, stream: null, activeGroup: 'core' };
 const $ = (selector) => document.querySelector(selector);
+
+function rounded(value) { return Math.round(value * 10) / 10; }
+function applyReferences(announce = false) {
+  const height = Number($('#referenceHeight').value), chest = Number($('#referenceChest').value), hip = Number($('#referenceHip').value);
+  if (![height, chest, hip].every(Number.isFinite) || height <= 0 || chest <= 0 || hip <= 0) { toast('Enter valid inch values for all three fitting references.'); return false; }
+  const lengthScale = height / baseValues.height, upperScale = chest / baseValues.chest, lowerScale = hip / baseValues.hip;
+  const calibrated = {...baseValues};
+  ['height', 'shoulder', 'sleeve', 'inseam', 'outseam'].forEach(key => calibrated[key] = rounded(baseValues[key] * lengthScale));
+  ['neck', 'armhole', 'bicep', 'elbow', 'wrist'].forEach(key => calibrated[key] = rounded(baseValues[key] * upperScale));
+  ['thigh', 'knee', 'calf', 'ankle'].forEach(key => calibrated[key] = rounded(baseValues[key] * lowerScale));
+  calibrated.waist = rounded(baseValues.waist * ((upperScale + lowerScale) / 2));
+  calibrated.chest = rounded(chest); calibrated.hip = rounded(hip); calibrated.height = rounded(height);
+  state.values = calibrated; state.references = {height: rounded(height), chest: rounded(chest), hip: rounded(hip)};
+  if (announce) toast('Height, snug chest, and snug hip references applied.');
+  return true;
+}
 
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.id === id));
   $('#restartButton').hidden = id === 'home';
-  if (id === 'review') renderMeasurements();
+  if (id === 'review') { renderMeasurements(); $('#referenceStatus').textContent = `Calibrated from actual height ${state.references.height} in, snug chest ${state.references.chest} in, and snug hip ${state.references.hip} in.`; }
   if (id === 'summary') renderSummary();
   stopCamera(); window.scrollTo({top: 0, behavior: 'smooth'});
 }
@@ -49,12 +66,12 @@ function renderMeasurements() {
 function renderSummary() { $('#summaryList').innerHTML = measurements.map(([key, label]) => `<div class="summary-row"><span>${label}</span><strong>${Number(state.values[key]).toFixed(1)} in</strong></div>`).join(''); }
 function toast(message) { const el = $('#toast'); el.textContent = message; el.classList.add('show'); setTimeout(() => el.classList.remove('show'), 2600); }
 
-document.querySelectorAll('[data-go]').forEach(button => button.addEventListener('click', () => showScreen(button.dataset.go)));
+document.querySelectorAll('[data-go]').forEach(button => button.addEventListener('click', () => { if (button.dataset.go === 'front' && !applyReferences()) return; showScreen(button.dataset.go); }));
+$('#applyReferences').addEventListener('click', () => applyReferences(true));
 $('#restartButton').addEventListener('click', () => showScreen('home'));
 $('#frontCapture').addEventListener('click', () => handleCapture('front'));
 $('#sideCapture').addEventListener('click', () => handleCapture('side'));
 $('#frontRetake').addEventListener('click', () => { state.captures.front = null; state.skippedCapture.front = false; openCamera('front'); });
 document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => { state.activeGroup = tab.dataset.group; document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t === tab)); renderMeasurements(); }));
 $('#summaryButton').addEventListener('click', () => showScreen('summary'));
-$('#saveButton').addEventListener('click', () => { const profiles = JSON.parse(localStorage.getItem('tailorScanProfiles') || '[]'); const name = $('#profileName').value.trim() || 'Unnamed client'; profiles.unshift({id: Date.now(), name, values: state.values, savedAt: new Date().toISOString()}); localStorage.setItem('tailorScanProfiles', JSON.stringify(profiles)); toast(`${name}'s profile saved on this device.`); });
-
+$('#saveButton').addEventListener('click', () => { const profiles = JSON.parse(localStorage.getItem('tailorScanProfiles') || '[]'); const name = $('#profileName').value.trim() || 'Unnamed client'; profiles.unshift({id: Date.now(), name, values: state.values, references: state.references, savedAt: new Date().toISOString()}); localStorage.setItem('tailorScanProfiles', JSON.stringify(profiles)); toast(`${name}'s profile saved on this device.`); });
