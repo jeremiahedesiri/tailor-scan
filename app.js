@@ -18,7 +18,12 @@ async function openCamera(view) {
   const video = $(`#${view}Video`), message = $(`#${view}Message`), preview = $(`#${view}Preview`);
   try {
     stopCamera();
-    state.stream = await navigator.mediaDevices.getUserMedia({video: {facingMode: 'user'}, audio: false});
+    // Rear cameras generally offer a wider, higher-quality full-body capture.
+    // `ideal` keeps the flow usable on desktop browsers and single-camera devices.
+    state.stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' } },
+      audio: false
+    });
     video.srcObject = state.stream; preview.hidden = true; message.hidden = true;
     $(`#${view}Capture`).textContent = 'Capture photo';
   } catch (error) {
@@ -52,3 +57,4 @@ $('#frontRetake').addEventListener('click', () => { state.captures.front = null;
 document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => { state.activeGroup = tab.dataset.group; document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t === tab)); renderMeasurements(); }));
 $('#summaryButton').addEventListener('click', () => showScreen('summary'));
 $('#saveButton').addEventListener('click', () => { const profiles = JSON.parse(localStorage.getItem('tailorScanProfiles') || '[]'); const name = $('#profileName').value.trim() || 'Unnamed client'; profiles.unshift({id: Date.now(), name, values: state.values, savedAt: new Date().toISOString()}); localStorage.setItem('tailorScanProfiles', JSON.stringify(profiles)); toast(`${name}'s profile saved on this device.`); });
+
