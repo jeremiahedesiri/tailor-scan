@@ -16,6 +16,16 @@
         <h1 id="hero-title">Measurements that begin with a scan.</h1>
         <p class="lede">Capture two guided views, then review and tailor every measurement in inches.</p>
         <div class="feature-card"><span class="feature-icon">⌁</span><div><strong>Designed for fitting</strong><p>Compact body circumferences, with manual control where it matters.</p></div></div>
+        <section class="reference-card" aria-labelledby="reference-title">
+          <div class="reference-heading"><div><span class="eyebrow">Accuracy anchors</span><h2 id="reference-title">Add your tape-measure references.</h2></div><span class="reference-badge">Recommended</span></div>
+          <p>These known snug measurements calibrate the starting estimates. You can still correct every result.</p>
+          <div class="reference-grid">
+            <label>Actual height<input id="referenceHeight" type="number" min="36" max="96" step="0.1" value="66" inputmode="decimal" /><span>in</span><small>Top of head to floor</small></label>
+            <label>Snug chest<input id="referenceChest" type="number" min="20" max="80" step="0.1" value="36" inputmode="decimal" /><span>in</span><small>Round chest, no ease</small></label>
+            <label>Snug hip<input id="referenceHip" type="number" min="20" max="90" step="0.1" value="39" inputmode="decimal" /><span>in</span><small>Round fullest hip, no ease</small></label>
+          </div>
+          <button class="text-button" id="applyReferences" type="button">Apply fitting references</button>
+        </section>
         <button class="primary-button full" data-go="front">Start Scan <span>→</span></button>
         <p class="disclaimer">Camera-based estimates are not a substitute for a tape measure. Confirm measurements before cutting fabric.</p>
       </section>
@@ -25,7 +35,7 @@
         <div class="eyebrow">Front view</div><h2 id="front-title">Stand tall and face the camera.</h2>
         <p class="instruction">Keep your arms slightly away from your sides. Wear close-fitting clothing and include your full body in frame.</p>
         <div class="camera-stage" id="frontStage"><video id="frontVideo" autoplay playsinline muted></video><img id="frontPreview" alt="Captured front body view" hidden><div class="body-guide front-guide" aria-hidden="true"><span class="head"></span><span class="torso"></span><span class="leg left"></span><span class="leg right"></span></div><div class="camera-message" id="frontMessage">Camera preview will appear here</div></div>
-        <div class="calibration-note"><span>↕</span><p><strong>For better estimates:</strong> place a known-height reference beside the person, or enter their height during review.</p></div>
+        <div class="calibration-note"><span>↕</span><p><strong>For better estimates:</strong> use the actual height entered before the scan and keep the full body visible from head to feet.</p></div>
         <div class="capture-actions"><button class="secondary-button" id="frontRetake" hidden>Retake</button><button class="primary-button" id="frontCapture">Open camera</button></div>
       </section>
 
@@ -41,6 +51,7 @@
         <div class="stepper"><span class="step done">✓</span><i></i><span class="step done">✓</span><i></i><span class="step active">3</span></div>
         <div class="eyebrow">Measurement review</div><h2 id="review-title">Make it fit.</h2><p class="instruction">These are starting estimates. Adjust each number to match your fitting method.</p>
         <div class="accuracy-banner"><span>i</span><p>Measurements are displayed in inches. Use a tape measure to confirm important fit points.</p></div>
+        <p id="referenceStatus" class="reference-status"></p>
         <div class="measurement-tabs" role="tablist"><button class="tab active" data-group="core">Core</button><button class="tab" data-group="upper">Upper body</button><button class="tab" data-group="lower">Lower body</button></div>
         <form id="measurementForm" class="measurement-list"></form>
         <button class="primary-button full" id="summaryButton">View measurement summary <span>→</span></button>
