@@ -51,9 +51,9 @@ const linearMeasurementDefinitions = [
   { name: 'inseam', start: 'crotch', end: 'ankle' }
 ];
 const rotationStages = [
-  { id: 'front', angle: 0, instruction: 'Keep your full body inside the frame. Face the camera to capture the front view.' },
+  { id: 'front', angle: 0, instruction: 'Keep your full body, hands, and feet inside the frame. Face the camera to capture the front view.' },
   { id: 'frontRight', angle: 45, instruction: 'Rotate a little to your right. Capture an intermediate view while keeping your full body visible.' },
-  { id: 'right', angle: 90, instruction: 'Rotate slowly to your right. Keep your arms slightly away from your torso.' },
+  { id: 'right', angle: 90, instruction: 'Rotate slowly to your right. Keep your arms slightly away from your torso and keep both hands inside the guide.' },
   { id: 'backRight', angle: 135, instruction: 'Continue turning through an intermediate back-right view.' },
   { id: 'back', angle: 180, instruction: 'Continue turning until your back faces the camera. Keep your feet near the marked position.' },
   { id: 'backLeft', angle: 225, instruction: 'Continue turning through an intermediate back-left view.' },
@@ -67,7 +67,7 @@ const kingDraftMeasurementMap = Object.freeze([
   ['height', 'height'], ['chest', 'chest'], ['waist', 'waist'], ['hip', 'hip'], ['bicep', 'bicep'], ['calf', 'calf'],
   ['shoulder_to_waist', 'shoulderToWaist'], ['sleeve_length', 'sleeve'], ['trouser_length', 'trouserLength'], ['inseam', 'inseam'], ['outseam', 'outseam']
 ]);
-const state = { values: {...baseValues}, calibration: {}, circumferenceConstraints: {}, reconstruction: { landmarks: {}, rawBodyHeight: null, rawLinearMeasurements: {}, rawCircumferences: {}, globalPhysicalScale: null, rawGeometry: null, refinedGeometry: null, multiViewSession: null, refinementStatus: 'awaiting editable 3D reconstruction' }, captures: {}, rotationCaptures: {}, rotationCandidates: [], representativeFrames: [], rotationCoverage: null, rotationIndex: 0, skippedCapture: {}, stream: null, activeGroup: 'core' };
+const state = { values: Object.fromEntries(measurements.map(([name]) => [name, null])), calibration: {}, circumferenceConstraints: {}, reconstruction: { landmarks: {}, rawBodyHeight: null, rawLinearMeasurements: {}, rawCircumferences: {}, globalPhysicalScale: null, rawGeometry: null, refinedGeometry: null, multiViewSession: null, refinementStatus: 'awaiting editable 3D reconstruction' }, captures: {}, rotationCaptures: {}, rotationCandidates: [], representativeFrames: [], rotationCoverage: null, rotationIndex: 0, skippedCapture: {}, stream: null, activeGroup: 'core' };
 const $ = (selector) => document.querySelector(selector);
 
 function rounded(value) { return units.toInternal(value); }
@@ -213,7 +213,7 @@ function buildPendingCalibrationData(tapeValues) {
     measurementName: name, tapeValue: tapeValues[name] ?? null,
     rawScanValue: state.reconstruction.rawCircumferences[name] ?? null,
     scaleFactor: 1, scaleSource: 'awaiting raw 3D mesh measurement',
-    finalScaledValue: defaultValue,
+    finalScaledValue: null,
     confidenceStatus: tapeValues[name] != null ? 'tape anchor stored; awaiting valid raw mesh cross-section' : 'no tape anchor supplied',
     geometryStatus: 'not yet measured from mesh', geometryConfidence: null,
     geometryError: null, scalingError: null, scalingStatus: 'inactive'
@@ -256,7 +256,6 @@ function applyReferences(announce = false) {
   // Tape anchors are retained through capture. Circumference scaling begins only
   // after a valid anatomically oriented raw mesh perimeter exists.
   state.calibration = buildPendingCalibrationData(tapeValues);
-  if (tapeValues.height != null) state.values.height = tapeValues.height;
   if (announce) toast(Object.values(tapeValues).some(value => value != null) ? 'Calibration anchors applied.' : 'No tape values entered — scan estimates retained.');
   return true;
 }
@@ -342,6 +341,33 @@ function buildReconstructionInput(frames) {
     source: { cameraModel: 'approximately stationary camera; subject rotation at guided checkpoints' }
   };
 }
+function refinedMeshHeight(mesh) {
+  if (!mesh?.vertices?.length || mesh.coordinateUnit !== 'in') return null;
+  const vertical = mesh.vertices.filter((_, index) => index % 3 === 1);
+  return vertical.length ? rounded(Math.max(...vertical) - Math.min(...vertical)) : null;
+}
+function extractFinalRefinedMeshMeasurements(mesh, joints, reconstructionConfidence) {
+  if (!mesh || mesh.coordinateUnit !== 'in') return { status: 'failed: refined mesh is not physically scaled', measurements: {} };
+  const measurementsFromMesh = {};
+  if (window.tailorScanCircumference?.createProvider) {
+    const circumferences = window.tailorScanCircumference.createProvider().measure({ mesh, joints, reconstructionConfidence });
+    Object.entries(circumferences.measurements).forEach(([name, measurement]) => {
+      measurementsFromMesh[name] = measurement;
+      if (measurement.status.startsWith('success') && Number.isFinite(measurement.valueInches)) state.values[name] = rounded(measurement.valueInches);
+    });
+  }
+  if (window.tailorScanLinearMesh?.createProvider) {
+    const shoulder = window.tailorScanLinearMesh.createProvider().measure({ mesh, joints, reconstructionConfidence }).shoulder;
+    measurementsFromMesh.shoulder = shoulder;
+    if (shoulder.status.startsWith('success') && Number.isFinite(shoulder.valueInches)) state.values.shoulder = rounded(shoulder.valueInches);
+  }
+  const height = refinedMeshHeight(mesh);
+  if (height != null) {
+    state.values.height = height;
+    measurementsFromMesh.height = { status: 'success: refined mesh vertical extent measured in inches', valueInches: height, scaleSource: 'height-scaled refined mesh' };
+  }
+  return { status: 'success: refined mesh measurements extracted', measurements: measurementsFromMesh };
+}
 function frameStabilityIssues(frame) {
   const stability = frame.analysis?.stability;
   if (!stability) return ['missing body-stability analysis'];
@@ -372,7 +398,21 @@ async function prepareMultiViewReconstruction() {
     // mutate the baseline mesh by reference.
     const rawGeometry = { vertices: [...result.vertices], faces: [...result.faces], coordinateUnit: result.mesh.coordinateUnit, topology: result.mesh.topology, nearWatertight: result.mesh.nearWatertight, joints: result.joints, pose: result.pose, shape: result.shape, scale: result.scale, confidence: result.confidence, sourceFrameIds: result.diagnostics.sourceFrameIds };
     setRawReconstructionGeometry(rawGeometry);
-    let circumferenceMeasurement = null, regionalRefinement = null;
+    let circumferenceMeasurement = null, linearMeshMeasurement = null, regionalRefinement = null;
+    if (window.tailorScanLinearMesh?.createProvider) {
+      try {
+        linearMeshMeasurement = window.tailorScanLinearMesh.createProvider().measure({ mesh: result.mesh, joints: result.joints, reconstructionConfidence: result.confidence });
+        const shoulder = linearMeshMeasurement.shoulder;
+        if (shoulder.status.startsWith('success') && Number.isFinite(shoulder.valueInches)) {
+          const rawLinearMeasurements = {...state.reconstruction.rawLinearMeasurements, shoulder: rounded(shoulder.valueInches)};
+          rawGeometry.rawLinearMeasurements = rawLinearMeasurements;
+          state.reconstruction = {...state.reconstruction, rawLinearMeasurements};
+          if (state.calibration.shoulder) Object.assign(state.calibration.shoulder, { rawScanValue: rounded(shoulder.valueInches), finalScaledValue: null, scaleFactor: 1, scaleSource: shoulder.scaleSource, geometryConfidence: shoulder.confidence, confidenceStatus: 'raw mesh shoulder measurement retained for refined-mesh comparison', scalingStatus: 'awaiting refined mesh measurement' });
+        }
+      } catch (error) {
+        linearMeshMeasurement = { shoulder: { status: `failed: 3D shoulder measurement (${error.message})`, confidence: 0 } };
+      }
+    }
     if (window.tailorScanCircumference?.createProvider) {
       try {
         const measurementProvider = state.reconstruction.circumferenceProvider || window.tailorScanCircumference.createProvider();
@@ -388,8 +428,6 @@ async function prepareMultiViewReconstruction() {
         const regionalCalibration = applyRegionalMeshScaling(tapeValues, circumferenceMeasurement.measurements);
         state.calibration = {...state.calibration, ...regionalCalibration};
         Object.entries(regionalCalibration).forEach(([name, record]) => {
-          // Keep the raw result visible unless actual mesh refinement succeeds.
-          if (record.rawGeometryValue != null) state.values[name] = record.rawGeometryValue;
           const constraint = state.circumferenceConstraints[name];
           if (constraint) Object.assign(constraint, {
             scaleFactor: record.scaleFactor, proposedScaleFactor: record.proposedScaleFactor,
@@ -403,13 +441,15 @@ async function prepareMultiViewReconstruction() {
           regionalRefinement = window.tailorScanRefinement.createProvider().refine({ rawMesh: result.mesh, joints: result.joints, constraints: state.circumferenceConstraints, reconstructionConfidence: result.confidence });
           if (regionalRefinement.mesh) {
             state.reconstruction.refinedGeometry = { vertices: [...regionalRefinement.mesh.vertices], faces: [...regionalRefinement.mesh.faces], coordinateUnit: regionalRefinement.mesh.coordinateUnit, joints: result.joints, source: 'bounded local tape-constrained refinement', iterations: regionalRefinement.iterations, constraints: regionalRefinement.constraints };
-            Object.entries(regionalRefinement.measurements.measurements).forEach(([name, measurement]) => {
+            const refinedMeshMeasurement = extractFinalRefinedMeshMeasurements(regionalRefinement.mesh, result.joints, result.confidence);
+            state.reconstruction.refinedGeometry.measurements = refinedMeshMeasurement;
+            Object.entries(refinedMeshMeasurement.measurements).forEach(([name, measurement]) => {
               if (!measurement.status.startsWith('success') || !Number.isFinite(measurement.valueInches)) return;
-              state.values[name] = rounded(measurement.valueInches);
+              const refinementConstraint = regionalRefinement.constraints[name];
               const record = state.calibration[name];
-              if (record) Object.assign(record, { finalScaledValue: rounded(measurement.valueInches), scaleFactor: rounded(measurement.valueInches / record.rawGeometryValue), scaleSource: 'remeasured from locally tape-constrained refined mesh', scalingError: record.tapeValue != null ? rounded(measurement.valueInches - record.tapeValue) : null, scalingStatus: regionalRefinement.constraints[name]?.status || 'refined' });
+              if (record) Object.assign(record, { finalScaledValue: rounded(measurement.valueInches), scaleFactor: Number.isFinite(record.rawGeometryValue) ? rounded(measurement.valueInches / record.rawGeometryValue) : (record.scaleFactor || 1), scaleSource: 'remeasured from locally tape-constrained refined mesh', scalingError: record.tapeValue != null ? rounded(measurement.valueInches - record.tapeValue) : null, scalingStatus: refinementConstraint?.status || 'refined' });
               const constraint = state.circumferenceConstraints[name];
-              if (constraint) Object.assign(constraint, { refinedReconstructedValue: rounded(measurement.valueInches), remainingError: constraint.tapeValue != null ? rounded(measurement.valueInches - constraint.tapeValue) : null, appliedRefinement: regionalRefinement.constraints[name]?.appliedRefinement || null, status: regionalRefinement.constraints[name]?.status || constraint.status });
+              if (constraint) Object.assign(constraint, { refinedReconstructedValue: rounded(measurement.valueInches), remainingError: constraint.tapeValue != null ? rounded(measurement.valueInches - constraint.tapeValue) : null, appliedRefinement: refinementConstraint?.appliedRefinement || null, status: refinementConstraint?.status || constraint.status });
             });
             state.reconstruction.refinementStatus = 'raw mesh preserved; final circumference values remeasured from locally refined mesh';
           } else state.reconstruction.refinementStatus = regionalRefinement.status;
@@ -421,7 +461,7 @@ async function prepareMultiViewReconstruction() {
     state.reconstruction.multiViewSession = {
       status: result.status, coverage, frames: buildReconstructionInput(state.representativeFrames).frames,
       rawGeometry, bodyRepresentation: buildMultiViewPoseRepresentation(state.representativeFrames), mesh: result.mesh,
-      confidence: result.confidence, diagnostics: result.diagnostics, circumferenceMeasurement, regionalRefinement,
+      confidence: result.confidence, diagnostics: result.diagnostics, circumferenceMeasurement, linearMeshMeasurement, regionalRefinement,
       stabilityWarnings: state.representativeFrames.filter(frame => frameStabilityIssues(frame).length).map(frame => ({ frameId: frame.id, issues: frameStabilityIssues(frame) }))
     };
     state.reconstruction.kingDraftMeasurementOutput = buildKingDraftMeasurementOutput();
@@ -474,6 +514,7 @@ function handleRotationCapture() {
 }
 function resetRotationCapture() {
   state.rotationCaptures = {}; state.rotationCandidates = []; state.representativeFrames = [];
+  state.values = Object.fromEntries(measurements.map(([name]) => [name, null]));
   // A new capture must never inherit a previous person's raw or refined mesh.
   state.reconstruction = {...state.reconstruction, rawGeometry: null, refinedGeometry: null, multiViewSession: null, refinementStatus: 'awaiting editable 3D reconstruction'};
   state.rotationCoverage = refreshRotationFrameSelection(); state.rotationIndex = 0; renderRotationStage();
@@ -517,10 +558,10 @@ function capture(view) {
 }
 function handleCapture(view) { state.stream ? capture(view) : ((state.captures[view] || state.skippedCapture[view]) ? showScreen(view === 'front' ? 'side' : 'review') : openCamera(view)); }
 function renderMeasurements() {
-  const list = $('#measurementForm'); list.innerHTML = measurements.filter(([, ,group]) => group === state.activeGroup).map(([key, label]) => `<div class="measure-row"><label for="${key}">${label}</label><div class="measure-input"><input id="${key}" type="number" min="0" max="120" step="0.1" value="${units.toDisplay(state.values[key])}" inputmode="decimal" aria-label="${label} in inches"><span>${units.display}</span></div></div>`).join('');
-  list.querySelectorAll('input').forEach(input => input.addEventListener('input', () => { if (input.value !== '') state.values[input.id] = units.toInternal(units.fromDisplay(input.value)); }));
+  const list = $('#measurementForm'); list.innerHTML = measurements.filter(([, ,group]) => group === state.activeGroup).map(([key, label]) => `<div class="measure-row"><label for="${key}">${label}</label><div class="measure-input"><input id="${key}" type="number" min="0" max="120" step="0.1" value="${Number.isFinite(state.values[key]) ? units.toDisplay(state.values[key]) : ''}" placeholder="Needs mesh/manual" inputmode="decimal" aria-label="${label} in inches"><span>${units.display}</span></div></div>`).join('');
+  list.querySelectorAll('input').forEach(input => input.addEventListener('input', () => { state.values[input.id] = input.value === '' ? null : units.toInternal(units.fromDisplay(input.value)); }));
 }
-function renderSummary() { $('#summaryList').innerHTML = measurements.map(([key, label]) => `<div class="summary-row"><span>${label}</span><strong>${units.format(state.values[key])}</strong></div>`).join(''); }
+function renderSummary() { $('#summaryList').innerHTML = measurements.map(([key, label]) => `<div class="summary-row"><span>${label}</span><strong>${Number.isFinite(state.values[key]) ? units.format(state.values[key]) : 'Needs mesh/manual'}</strong></div>`).join(''); }
 function toast(message) { const el = $('#toast'); el.textContent = message; el.classList.add('show'); setTimeout(() => el.classList.remove('show'), 2600); }
 
 document.querySelectorAll('[data-go]').forEach(button => button.addEventListener('click', () => { if (button.dataset.go === 'scan360') { if (!applyReferences()) return; resetRotationCapture(); } if (button.dataset.go === 'front' && !applyReferences()) return; showScreen(button.dataset.go); }));

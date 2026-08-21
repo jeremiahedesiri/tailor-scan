@@ -8,7 +8,7 @@
   const multiply = (a, factor) => a.map(value => value * factor);
   const magnitude = vector => Math.sqrt(dot(vector, vector));
   const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
-  const POLICY = Object.freeze({ maxIterations: 4, convergenceToleranceInches: .1, maxTotalScaleDeviation: .3, maxStepScaleDeviation: .12 });
+  const POLICY = Object.freeze({ maxIterations: 12, convergenceToleranceInches: .1, maxStepScaleDeviation: .2, mandatoryAnchors: true });
 
   function meshHeight(mesh) {
     const values = mesh.vertices.filter((_, index) => index % 3 === 1);
@@ -67,7 +67,6 @@
           const measurement = measurements.measurements[name], current = measurement?.valueInches;
           if (!measurement?.status?.startsWith('success') || !Number.isFinite(current) || !measurement.plane) { results[name] = { ...results[name], status: 'failed: refinement plane/cross-section invalid' }; continue; }
           const totalScale = constraint.tapeValue / current;
-          if (Math.abs(totalScale - 1) > POLICY.maxTotalScaleDeviation) { results[name] = { ...results[name], status: 'withheld: required local deformation is implausibly large', currentValue: current, proposedScaleFactor: totalScale }; continue; }
           if (Math.abs(current - constraint.tapeValue) <= POLICY.convergenceToleranceInches) { results[name] = { ...results[name], status: 'converged', currentValue: current, appliedRefinement: false }; continue; }
           const deformation = deformRegion(refinedMesh, measurement.plane, totalScale);
           results[name] = { ...results[name], status: 'refined', currentValue: current, proposedScaleFactor: totalScale, appliedRefinement: { region: measurement.plane.region, stepScale: deformation.stepScale, falloffWidth: deformation.width } };
@@ -78,9 +77,11 @@
       const finalMeasurements = measurementProvider.measure({ mesh: refinedMesh, joints, reconstructionConfidence });
       active.forEach(([name, constraint]) => {
         if (results[name]?.status?.startsWith('withheld')) return;
-        results[name] = { ...results[name], ...constraintStatus(name, constraint, finalMeasurements) };
+        const finalStatus = constraintStatus(name, constraint, finalMeasurements);
+        results[name] = { ...results[name], ...finalStatus, status: Math.abs(finalStatus.remainingError ?? Infinity) <= POLICY.convergenceToleranceInches ? 'converged' : 'failed: mandatory anchor did not converge within tolerance' };
       });
-      return { status: 'success: bounded local tape-constrained mesh refinement', mesh: refinedMesh, constraints: results, measurements: finalMeasurements, iterations, policy: POLICY };
+      const failures = Object.values(results).filter(result => result.tapeValue != null && result.status.startsWith('failed'));
+      return { status: failures.length ? 'completed with anchor convergence failures' : 'success: mandatory local tape-constrained mesh refinement', mesh: refinedMesh, constraints: results, measurements: finalMeasurements, iterations, policy: POLICY };
     }
   }
   window.tailorScanRefinement = { createProvider: () => new LocalMeshRefinementProvider(), policy: POLICY };

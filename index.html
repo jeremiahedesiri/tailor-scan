@@ -36,9 +36,9 @@
       <section id="scan360" class="screen capture-screen" aria-labelledby="scan360-title">
         <div class="stepper"><span class="step active">1</span><i></i><span class="step">2</span><i></i><span class="step">3</span></div>
         <div class="eyebrow">Guided 360° capture</div><h2 id="scan360-title">Stay in frame and make one slow turn.</h2>
-        <p class="instruction" id="rotationInstruction">Keep your full body inside the frame. Face the camera to capture the front view.</p>
+        <p class="instruction" id="rotationInstruction">Keep your full body, hands, and feet inside the frame. Face the camera to capture the front view.</p>
         <div class="rotation-progress" aria-label="Rotation capture progress"><span data-rotation-stage="front">0°<small>Front</small></span><span data-rotation-stage="right">90°<small>Right</small></span><span data-rotation-stage="back">180°<small>Back</small></span><span data-rotation-stage="left">270°<small>Left</small></span><span data-rotation-stage="complete">360°<small>Complete</small></span></div>
-        <div class="camera-stage" id="scan360Stage"><video id="scan360Video" autoplay playsinline muted></video><img id="scan360Preview" alt="Current 360 body capture" hidden><div class="body-guide front-guide" aria-hidden="true"><span class="head"></span><span class="torso"></span><span class="leg left"></span><span class="leg right"></span></div><div class="camera-message" id="scan360Message">Camera preview will appear here</div></div>
+        <div class="camera-stage" id="scan360Stage"><video id="scan360Video" autoplay playsinline muted></video><img id="scan360Preview" alt="Current 360 body capture" hidden><div class="body-guide front-guide" aria-hidden="true"><span class="head"></span><span class="torso"></span><span class="arm left-arm"></span><span class="arm right-arm"></span><span class="hand left-hand"></span><span class="hand right-hand"></span><span class="leg left"></span><span class="leg right"></span></div><div class="camera-message" id="scan360Message">Camera preview will appear here</div></div>
         <div class="calibration-note"><span>↻</span><p><strong>For best reconstruction:</strong> keep the phone still, stand naturally with arms slightly away from your torso, keep your feet near the marked position, and rotate slowly.</p></div>
         <p class="rotation-status" id="rotationStatus">Capture the front, right side, back, and left side to verify full coverage.</p>
         <div class="capture-actions"><button class="secondary-button" id="rotationRetake" hidden>Retake previous view</button><button class="primary-button" id="rotationCapture">Open rear camera</button></div>
@@ -48,7 +48,7 @@
         <div class="stepper"><span class="step active">1</span><i></i><span class="step">2</span><i></i><span class="step">3</span></div>
         <div class="eyebrow">Front view</div><h2 id="front-title">Stand tall and face the camera.</h2>
         <p class="instruction">Keep your arms slightly away from your sides. Wear close-fitting clothing and include your full body in frame.</p>
-        <div class="camera-stage" id="frontStage"><video id="frontVideo" autoplay playsinline muted></video><img id="frontPreview" alt="Captured front body view" hidden><div class="body-guide front-guide" aria-hidden="true"><span class="head"></span><span class="torso"></span><span class="leg left"></span><span class="leg right"></span></div><div class="camera-message" id="frontMessage">Camera preview will appear here</div></div>
+        <div class="camera-stage" id="frontStage"><video id="frontVideo" autoplay playsinline muted></video><img id="frontPreview" alt="Captured front body view" hidden><div class="body-guide front-guide" aria-hidden="true"><span class="head"></span><span class="torso"></span><span class="arm left-arm"></span><span class="arm right-arm"></span><span class="hand left-hand"></span><span class="hand right-hand"></span><span class="leg left"></span><span class="leg right"></span></div><div class="camera-message" id="frontMessage">Camera preview will appear here</div></div>
         <div class="calibration-note"><span>↕</span><p><strong>For better estimates:</strong> use the actual height entered before the scan and keep the full body visible from head to feet.</p></div>
         <div class="capture-actions"><button class="secondary-button" id="frontRetake" hidden>Retake</button><button class="primary-button" id="frontCapture">Open camera</button></div>
       </section>
@@ -82,6 +82,7 @@
     <script src="reconstruction-provider.js"></script>
     <script src="circumference-measurement.js"></script>
     <script src="mesh-refinement.js"></script>
+    <script src="linear-mesh-measurement.js"></script>
     <script src="app.js"></script>
     <script src="vision-provider.js"></script>
   </body>

@@ -45,10 +45,10 @@ test('locally refines a mesh region toward tape circumference without altering r
   assert.notDeepEqual(result.mesh.vertices, rawVertices);
   assert.ok(Math.abs(result.constraints.chest.refinedValue - tapeChest) <= .1);
   assert.ok(Math.abs(result.constraints.chest.remainingError) <= .1);
-  assert.equal(result.constraints.chest.status, 'measured');
+  assert.equal(result.constraints.chest.status, 'converged');
 });
 
-test('refuses constraints that need implausibly large deformation', () => {
+test('forces a large valid anchor through controlled iterative local refinement', () => {
   const { circumference, refinement } = providers();
   const rawMesh = cylinder();
   const rawChest = circumference.measure({ mesh: rawMesh, joints, reconstructionConfidence: 1 }).measurements.chest.valueInches;
@@ -57,5 +57,6 @@ test('refuses constraints that need implausibly large deformation', () => {
     constraints: { chest: { tapeValue: rawChest * 1.6, initialReconstructedValue: rawChest, geometryStatus: 'success: mesh cross-section measured in inches', geometryConfidence: 1 } }
   });
   assert.ok(result.mesh);
-  assert.match(result.constraints.chest.status, /withheld: required local deformation/);
+  assert.equal(result.constraints.chest.status, 'converged');
+  assert.ok(Math.abs(result.constraints.chest.refinedValue - rawChest * 1.6) <= .1);
 });

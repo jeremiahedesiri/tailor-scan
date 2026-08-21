@@ -68,3 +68,12 @@ test('creates a KingDraft-ready body-measurement payload with separate diagnosti
   assert.equal(output.diagnostics.chest.status, 'applied');
   assert.equal(output.diagnostics.shoulder_to_waist.raw_value, null);
 });
+
+test('starts scan-result fields without default body measurements', () => {
+  const { state, buildKingDraftMeasurementOutput } = loadCalibrationLogic();
+  assert.ok(Object.values(state.values).every(value => value === null));
+  const output = buildKingDraftMeasurementOutput();
+  assert.equal(output.shoulder_to_waist, null);
+  assert.equal(output.chest, null);
+  assert.equal(output.diagnostics.chest.status, 'not reconstructed');
+});
