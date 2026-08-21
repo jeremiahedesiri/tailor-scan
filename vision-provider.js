@@ -1,8 +1,14 @@
 // On-device vision provider. MediaPipe Tasks Vision and the referenced selfie
 // segmentation / pose models are used for real per-frame inference only.
 // This provider intentionally does not fabricate a body mesh.
-const WASM_ROOT = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm';
-const TASKS_VISION_MODULE = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/+esm';
+// Keep the JavaScript module and WASM files on the exact same release. The
+// newer 0.10.35 binary currently fails WebAssembly validation on iOS Safari.
+// Both candidates below use the CPU path and the second is a separate release,
+// so Safari never retries the same corrupt/incompatible binary.
+const VISION_RUNTIMES = [
+  { module: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22-rc.20250304/+esm', wasm: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22-rc.20250304/wasm' },
+  { module: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm', wasm: 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm' }
+];
 const POSE_MODEL = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task';
 const SEGMENTATION_MODEL = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite';
 const POSE_INDEX = { leftShoulder: 11, rightShoulder: 12, leftElbow: 13, rightElbow: 14, leftWrist: 15, rightWrist: 16, leftHip: 23, rightHip: 24, leftKnee: 25, rightKnee: 26, leftAnkle: 27, rightAnkle: 28 };
@@ -46,13 +52,19 @@ function estimateOrientation(landmarks, guidedAngle) {
 
 class MediaPipeVisionProvider {
   static async create() {
-    const { FilesetResolver, ImageSegmenter, PoseLandmarker } = await import(TASKS_VISION_MODULE);
-    const fileset = await FilesetResolver.forVisionTasks(WASM_ROOT);
-    const [pose, segmenter] = await Promise.all([
-      PoseLandmarker.createFromOptions(fileset, { baseOptions: { modelAssetPath: POSE_MODEL }, runningMode: 'IMAGE', numPoses: 1, outputSegmentationMasks: false }),
-      ImageSegmenter.createFromOptions(fileset, { baseOptions: { modelAssetPath: SEGMENTATION_MODEL }, runningMode: 'IMAGE', outputConfidenceMasks: true, outputCategoryMask: true })
-    ]);
-    return new MediaPipeVisionProvider(pose, segmenter);
+    const failures = [];
+    for (const runtime of VISION_RUNTIMES) {
+      try {
+        const { FilesetResolver, ImageSegmenter, PoseLandmarker } = await import(runtime.module);
+        const fileset = await FilesetResolver.forVisionTasks(runtime.wasm);
+        const [pose, segmenter] = await Promise.all([
+          PoseLandmarker.createFromOptions(fileset, { baseOptions: { modelAssetPath: POSE_MODEL, delegate: 'CPU' }, runningMode: 'IMAGE', numPoses: 1, outputSegmentationMasks: false }),
+          ImageSegmenter.createFromOptions(fileset, { baseOptions: { modelAssetPath: SEGMENTATION_MODEL, delegate: 'CPU' }, runningMode: 'IMAGE', outputConfidenceMasks: true, outputCategoryMask: true })
+        ]);
+        return new MediaPipeVisionProvider(pose, segmenter);
+      } catch (error) { failures.push(error?.message || String(error)); }
+    }
+    throw new Error(`The iPhone vision engine could not start after two compatible runtime attempts. ${failures.at(-1) || ''}`.trim());
   }
   constructor(pose, segmenter) { this.pose = pose; this.segmenter = segmenter; }
   analyzeFrame = async (frame) => {
