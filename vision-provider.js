@@ -23,12 +23,15 @@ function sharpnessScore(image) {
 function segmentationDetails(result, frameWidth, frameHeight) {
   const mask = result.confidenceMasks?.[1] || result.confidenceMasks?.[0];
   if (!mask?.getAsFloat32Array) throw new Error('Person-confidence mask was not returned by the segmentation model.');
-  const data = new Float32Array(mask.getAsFloat32Array()), width = mask.width, height = mask.height; let sum = 0, count = 0, minX = width, minY = height, maxX = -1, maxY = -1;
-  data.forEach((confidence, index) => { sum += confidence; if (confidence >= .5) { const x = index % width, y = Math.floor(index / width); count += 1; minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); } });
+  const data = new Float32Array(mask.getAsFloat32Array()), width = mask.width, height = mask.height; let personConfidenceSum = 0, count = 0, minX = width, minY = height, maxX = -1, maxY = -1;
+  data.forEach((confidence, index) => { if (confidence >= .5) { const x = index % width, y = Math.floor(index / width); count += 1; personConfidenceSum += confidence; minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); } });
   if (!count) throw new Error('No usable person silhouette detected.');
   const boundingBox = { x: minX / width, y: minY / height, width: (maxX - minX + 1) / width, height: (maxY - minY + 1) / height };
   const edgeClipping = boundingBox.x < .01 || boundingBox.y < .01 || boundingBox.x + boundingBox.width > .99 || boundingBox.y + boundingBox.height > .99;
-  return { segmentationMaskRef: { width, height, data }, confidence: sum / data.length, frameDimensions: { width: frameWidth, height: frameHeight }, boundingBox, bodyVisibility: edgeClipping ? .5 : clamp((boundingBox.height - .45) / .45), edgeClipping };
+  // Quality must describe confidence in the detected person pixels, not the
+  // average over mostly-background pixels. The old whole-frame average made a
+  // valid full-body silhouette look low-confidence and rejected every video frame.
+  return { segmentationMaskRef: { width, height, data }, confidence: personConfidenceSum / count, foregroundCoverage: count / data.length, frameDimensions: { width: frameWidth, height: frameHeight }, boundingBox, bodyVisibility: edgeClipping ? .3 : clamp((boundingBox.height - .55) / .25), edgeClipping };
 }
 function estimateOrientation(landmarks, guidedAngle) {
   const left = landmarks[POSE_INDEX.leftShoulder], right = landmarks[POSE_INDEX.rightShoulder], leftHip = landmarks[POSE_INDEX.leftHip], rightHip = landmarks[POSE_INDEX.rightHip];
