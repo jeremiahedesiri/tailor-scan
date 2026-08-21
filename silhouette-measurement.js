@@ -40,8 +40,9 @@
     return points;
   }
 
-  function measure({ front, side, heightInches }) {
+  function measure({ front, side = null, heightInches }) {
     if (!Number.isFinite(heightInches) || heightInches <= 0) throw new Error('A valid height is required for scale.');
+    side ||= front;
     const analyses = { front, side }, landmarks = { front: anatomicalLandmarks(front), side: anatomicalLandmarks(side) };
     const scales = Object.fromEntries(Object.entries(analyses).map(([view, analysis]) => [view, heightInches / analysis.segmentation.boundingBox.height]));
     const measurements = { height: heightInches };
