@@ -14,20 +14,34 @@
       <section id="home" class="screen active hero-screen" aria-labelledby="hero-title">
         <div class="eyebrow">Made for precise fittings</div>
         <h1 id="hero-title">Measurements that begin with a scan.</h1>
-        <p class="lede">Capture two guided views, then review and tailor every measurement in inches.</p>
+        <p class="lede">Complete one guided turn, then review and tailor every measurement in inches.</p>
         <div class="feature-card"><span class="feature-icon">⌁</span><div><strong>Designed for fitting</strong><p>Compact body circumferences, with manual control where it matters.</p></div></div>
         <section class="reference-card" aria-labelledby="reference-title">
-          <div class="reference-heading"><div><span class="eyebrow">Accuracy anchors</span><h2 id="reference-title">Add your tape-measure references.</h2></div><span class="reference-badge">Recommended</span></div>
-          <p>These known snug measurements calibrate the starting estimates. You can still correct every result.</p>
+          <div class="reference-heading"><div><span class="eyebrow">Calibration measurements</span><h2 id="reference-title">Optional tape-measure anchors.</h2></div><span class="reference-badge">Optional</span></div>
+          <p>Enter any tape-measured values you have. Each value actively scales the matching scan estimate; all remaining values stay editable.</p>
           <div class="reference-grid">
-            <label>Actual height<input id="referenceHeight" type="number" min="36" max="96" step="0.1" value="66" inputmode="decimal" /><span>in</span><small>Top of head to floor</small></label>
-            <label>Snug chest<input id="referenceChest" type="number" min="20" max="80" step="0.1" value="36" inputmode="decimal" /><span>in</span><small>Round chest, no ease</small></label>
-            <label>Snug hip<input id="referenceHip" type="number" min="20" max="90" step="0.1" value="39" inputmode="decimal" /><span>in</span><small>Round fullest hip, no ease</small></label>
+            <label>Height<input id="calibrationHeight" type="number" min="0.1" max="120" step="0.1" inputmode="decimal" placeholder="Optional" /><span>in</span><small>Top of head to floor</small></label>
+            <label>Chest circumference<input id="calibrationChest" type="number" min="0.1" max="120" step="0.1" inputmode="decimal" placeholder="Optional" /><span>in</span><small>Snug, without ease</small></label>
+            <label>Waist circumference<input id="calibrationWaist" type="number" min="0.1" max="120" step="0.1" inputmode="decimal" placeholder="Optional" /><span>in</span><small>Natural waistline</small></label>
+            <label>Hip circumference<input id="calibrationHip" type="number" min="0.1" max="120" step="0.1" inputmode="decimal" placeholder="Optional" /><span>in</span><small>Fullest hip</small></label>
+            <label>Bicep circumference<input id="calibrationBicep" type="number" min="0.1" max="120" step="0.1" inputmode="decimal" placeholder="Optional" /><span>in</span><small>Fullest upper arm</small></label>
+            <label>Calf circumference<input id="calibrationCalf" type="number" min="0.1" max="120" step="0.1" inputmode="decimal" placeholder="Optional" /><span>in</span><small>Fullest calf</small></label>
           </div>
-          <button class="text-button" id="applyReferences" type="button">Apply fitting references</button>
+          <button class="text-button" id="applyReferences" type="button">Apply calibration anchors</button>
         </section>
-        <button class="primary-button full" data-go="front">Start Scan <span>→</span></button>
+        <button class="primary-button full" data-go="scan360">Start 360° scan <span>→</span></button>
         <p class="disclaimer">Camera-based estimates are not a substitute for a tape measure. Confirm measurements before cutting fabric.</p>
+      </section>
+
+      <section id="scan360" class="screen capture-screen" aria-labelledby="scan360-title">
+        <div class="stepper"><span class="step active">1</span><i></i><span class="step">2</span><i></i><span class="step">3</span></div>
+        <div class="eyebrow">Guided 360° capture</div><h2 id="scan360-title">Stay in frame and make one slow turn.</h2>
+        <p class="instruction" id="rotationInstruction">Keep your full body inside the frame. Face the camera to capture the front view.</p>
+        <div class="rotation-progress" aria-label="Rotation capture progress"><span data-rotation-stage="front">0°<small>Front</small></span><span data-rotation-stage="right">90°<small>Right</small></span><span data-rotation-stage="back">180°<small>Back</small></span><span data-rotation-stage="left">270°<small>Left</small></span><span data-rotation-stage="complete">360°<small>Complete</small></span></div>
+        <div class="camera-stage" id="scan360Stage"><video id="scan360Video" autoplay playsinline muted></video><img id="scan360Preview" alt="Current 360 body capture" hidden><div class="body-guide front-guide" aria-hidden="true"><span class="head"></span><span class="torso"></span><span class="leg left"></span><span class="leg right"></span></div><div class="camera-message" id="scan360Message">Camera preview will appear here</div></div>
+        <div class="calibration-note"><span>↻</span><p><strong>For best reconstruction:</strong> keep the phone still, stand naturally with arms slightly away from your torso, keep your feet near the marked position, and rotate slowly.</p></div>
+        <p class="rotation-status" id="rotationStatus">Capture the front, right side, back, and left side to verify full coverage.</p>
+        <div class="capture-actions"><button class="secondary-button" id="rotationRetake" hidden>Retake previous view</button><button class="primary-button" id="rotationCapture">Open rear camera</button></div>
       </section>
 
       <section id="front" class="screen capture-screen" aria-labelledby="front-title">
@@ -65,6 +79,10 @@
       </section>
     </main>
     <div id="toast" role="status" aria-live="polite"></div>
+    <script src="reconstruction-provider.js"></script>
+    <script src="circumference-measurement.js"></script>
+    <script src="mesh-refinement.js"></script>
     <script src="app.js"></script>
+    <script src="vision-provider.js"></script>
   </body>
 </html>
