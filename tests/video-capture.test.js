@@ -38,6 +38,13 @@ test('representative selection rejects blurred and duplicate video samples', () 
   }
 });
 
+test('a normally detailed mobile-video frame is not rejected as extreme blur', () => {
+  const { frameQualityScore } = loadVideoLogic();
+  const mobileFrameQuality = { ...goodQuality, sharpness: .3, motionBlur: .34 };
+  assert.ok(frameQualityScore(mobileFrameQuality) >= .68);
+  assert.equal(frameQualityScore({ ...mobileFrameQuality, motionBlur: .8 }), null);
+});
+
 test('coverage rejects incomplete turns, a missing side, and a missing back', () => {
   const { evaluateRotationCoverage } = loadVideoLogic();
   assert.equal(evaluateRotationCoverage([frame(0), frame(45), frame(90), frame(135)]).sufficient, false);

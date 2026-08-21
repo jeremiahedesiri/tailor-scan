@@ -57,7 +57,11 @@ class MediaPipeVisionProvider {
     const landmarks = poseResult.landmarks?.[0], worldLandmarks = poseResult.worldLandmarks?.[0];
     if (!landmarks || !worldLandmarks) throw new Error('No reliable body pose was detected.');
     const segmentation = segmentationDetails(segmentationResult, image.naturalWidth, image.naturalHeight), visibility = averageVisibility(landmarks), orientation = estimateOrientation(landmarks, frame.angle), sharpness = sharpnessScore(image);
-    return { quality: { sharpness, motionBlur: 1 - sharpness, bodyVisibility: segmentation.bodyVisibility, landmarkReliability: visibility, segmentationQuality: segmentation.confidence, occlusion: segmentation.edgeClipping ? 1 : 1 - visibility }, segmentationMaskRef: segmentation.segmentationMaskRef, segmentation, landmarks: namedLandmarks(landmarks), worldLandmarks: namedLandmarks(worldLandmarks), correspondenceKeypoints: namedLandmarks(landmarks), orientationDeg: orientation.orientationDeg, orientation, stability: null, frameReference: frame.id };
+    // The raw Laplacian score is deliberately conservative at phone-video
+    // resolution. Convert it to a blur heuristic before the frame gate rather
+    // than treating every normally detailed iPhone frame as severely blurred.
+    const motionBlur = clamp(1 - sharpness * 2.2);
+    return { quality: { sharpness, motionBlur, bodyVisibility: segmentation.bodyVisibility, landmarkReliability: visibility, segmentationQuality: segmentation.confidence, occlusion: segmentation.edgeClipping ? 1 : 1 - visibility }, segmentationMaskRef: segmentation.segmentationMaskRef, segmentation, landmarks: namedLandmarks(landmarks), worldLandmarks: namedLandmarks(worldLandmarks), correspondenceKeypoints: namedLandmarks(landmarks), orientationDeg: orientation.orientationDeg, orientation, stability: null, frameReference: frame.id };
   };
 }
 

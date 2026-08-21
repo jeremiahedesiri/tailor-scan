@@ -70,7 +70,7 @@ const kingDraftMeasurementMap = Object.freeze([
   ['height', 'height'], ['chest', 'chest'], ['waist', 'waist'], ['hip', 'hip'], ['bicep', 'bicep'], ['calf', 'calf'],
   ['shoulder_to_waist', 'shoulderToWaist'], ['sleeve_length', 'sleeve'], ['trouser_length', 'trouserLength'], ['inseam', 'inseam'], ['outseam', 'outseam']
 ]);
-const state = { values: Object.fromEntries(measurements.map(([name]) => [name, null])), calibration: {}, circumferenceConstraints: {}, reconstruction: { landmarks: {}, rawBodyHeight: null, rawLinearMeasurements: {}, rawCircumferences: {}, globalPhysicalScale: null, rawGeometry: null, refinedGeometry: null, multiViewSession: null, refinementStatus: 'awaiting editable 3D reconstruction' }, captures: {}, rotationCaptures: {}, rotationCandidates: [], representativeFrames: [], rotationCoverage: null, rotationIndex: 0, videoCapture: { mode: 'video', recording: false, processing: false, recorder: null, chunks: [], sampleTimer: null, startedAt: null, candidateCount: 0, blob: null }, skippedCapture: {}, stream: null, activeGroup: 'core' };
+const state = { values: Object.fromEntries(measurements.map(([name]) => [name, null])), calibration: {}, circumferenceConstraints: {}, reconstruction: { landmarks: {}, rawBodyHeight: null, rawLinearMeasurements: {}, rawCircumferences: {}, globalPhysicalScale: null, rawGeometry: null, refinedGeometry: null, multiViewSession: null, refinementStatus: 'awaiting editable 3D reconstruction' }, captures: {}, rotationCaptures: {}, rotationCandidates: [], representativeFrames: [], rotationCoverage: null, rotationIndex: 0, videoCapture: { mode: 'video', recording: false, processing: false, recorder: null, chunks: [], sampleTimer: null, startedAt: null, candidateCount: 0, blob: null, lastOutcome: null }, skippedCapture: {}, stream: null, activeGroup: 'core' };
 const $ = (selector) => document.querySelector(selector);
 
 function rounded(value) { return units.toInternal(value); }
@@ -335,9 +335,12 @@ async function analyzeRotationCandidatesWithVision() {
         setRotationFrameVisionAnalysis(frame.id, { inferenceError: error.message });
       }
     }
-    return prepareMultiViewReconstruction();
+    const session = await prepareMultiViewReconstruction();
+    state.videoCapture.lastOutcome = { analyzedFrames: state.rotationCandidates.length, selectedFrames: state.representativeFrames.length, coverage: state.rotationCoverage, reconstructionStatus: session.status };
+    return session;
   } catch (error) {
     state.reconstruction.multiViewSession = { status: `blocked: vision analysis failed (${error.message})`, mesh: null };
+    state.videoCapture.lastOutcome = { analyzedFrames: state.rotationCandidates.length, selectedFrames: state.representativeFrames.length, coverage: state.rotationCoverage, reconstructionStatus: state.reconstruction.multiViewSession.status };
     return state.reconstruction.multiViewSession;
   }
 }
@@ -499,7 +502,9 @@ function renderRotationStage() {
   if (videoMode) {
     const guidedAngle = guidedVideoAngle(videoElapsedMs());
     $('#rotationInstruction').textContent = processing ? 'Processing the recording. Tailor Scan is choosing sharp, complete body views for reconstruction.' : (recording ? 'Recording: rotate slowly, stay upright, and keep your full body, hands, and feet inside the guide.' : 'Position the phone, then press Start 360 Scan. Stand naturally with arms slightly away from your torso.');
-    $('#rotationStatus').textContent = processing ? `Processing Scan — ${qualityStatus}.` : (recording ? `Recording 360° Scan. Guided rotation estimate: ${Math.round(guidedAngle)}°. ${state.rotationCandidates.length} candidate frames sampled. Finish after one full turn.` : (state.rotationCoverage?.sufficient ? `Representative-frame coverage is sufficient. ${reconstructionStatus || 'Ready to review.'}` : 'A short 10–20 second turn is a guide only. Coverage, visibility, and frame quality decide whether the scan is accepted.'));
+    const outcome = state.videoCapture.lastOutcome;
+    const outcomeSummary = outcome ? `${outcome.selectedFrames} useful views selected from ${outcome.analyzedFrames} sampled frames.` : '';
+    $('#rotationStatus').textContent = processing ? `Processing Scan — ${qualityStatus}.` : (recording ? `Recording 360° Scan. Guided rotation estimate: ${Math.round(guidedAngle)}°. ${state.rotationCandidates.length} candidate frames sampled. Finish after one full turn.` : (state.rotationCoverage?.sufficient ? `Scan accepted. ${outcomeSummary} ${reconstructionStatus || 'Ready to review.'}` : (outcome ? `Scan needs another try: ${qualityStatus}. ${outcomeSummary} Keep your full body in frame and make one slow full turn.` : 'A short 10–20 second turn is a guide only. Coverage, visibility, and frame quality decide whether the scan is accepted.')));
     document.querySelectorAll('[data-rotation-stage]').forEach(point => {
       const milestone = Number(point.dataset.rotationStage === 'front' ? 0 : rotationStages.find(item => item.id === point.dataset.rotationStage)?.angle || 360);
       point.classList.toggle('captured', recording ? guidedAngle >= milestone : (state.rotationCoverage?.sufficient && milestone < 360));
@@ -508,7 +513,7 @@ function renderRotationStage() {
     $('#rotationManual').hidden = recording || processing;
     $('#rotationManual').textContent = 'Use photo checkpoints instead';
     $('#rotationCapture').disabled = processing;
-    $('#rotationCapture').textContent = processing ? 'Processing Scan' : (state.rotationCoverage?.sufficient && !recording ? 'Continue to measurements' : (recording ? 'Finish Scan' : (state.stream ? 'Start 360 Scan' : 'Open rear camera')));
+    $('#rotationCapture').textContent = processing ? 'Processing Scan' : (state.rotationCoverage?.sufficient && !recording ? 'Continue to measurements' : (recording ? 'Finish Scan' : (state.stream ? 'Start 360 Scan' : (outcome ? 'Try 360 Scan Again' : 'Open rear camera'))));
     return;
   }
   $('#rotationInstruction').textContent = stage.instruction;
@@ -562,6 +567,7 @@ function startRotationVideoCapture() {
   if (!state.stream || state.videoCapture.recording) return;
   state.videoCapture.recording = true;
   state.videoCapture.startedAt = performance.now();
+  state.videoCapture.lastOutcome = null;
   state.videoCapture.chunks = [];
   if (window.MediaRecorder) {
     try {
@@ -604,6 +610,7 @@ function handleRotationCapture() {
     if (state.rotationCoverage?.sufficient && !state.videoCapture.recording) { showScreen('review'); return; }
     if (state.videoCapture.recording) { finishRotationVideoCapture(); return; }
     if (state.stream) { startRotationVideoCapture(); return; }
+    if (state.videoCapture.lastOutcome) resetRotationCapture();
     openRotationCamera();
     return;
   }
@@ -621,7 +628,7 @@ function resetRotationCapture() {
     state.videoCapture.recorder.stop();
   }
   clearVideoCaptureBuffers();
-  state.videoCapture.recording = false; state.videoCapture.processing = false; state.videoCapture.candidateCount = 0;
+  state.videoCapture.recording = false; state.videoCapture.processing = false; state.videoCapture.candidateCount = 0; state.videoCapture.lastOutcome = null;
   state.rotationCaptures = {}; state.rotationCandidates = []; state.representativeFrames = [];
   state.values = Object.fromEntries(measurements.map(([name]) => [name, null]));
   // A new capture must never inherit a previous person's raw or refined mesh.
