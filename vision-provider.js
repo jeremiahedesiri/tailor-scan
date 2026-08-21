@@ -11,12 +11,9 @@ const VISION_RUNTIMES = [
 ];
 const POSE_MODEL = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task';
 const SEGMENTATION_MODEL = 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite';
-const POSE_INDEX = { leftShoulder: 11, rightShoulder: 12, leftElbow: 13, rightElbow: 14, leftWrist: 15, rightWrist: 16, leftHip: 23, rightHip: 24, leftKnee: 25, rightKnee: 26, leftAnkle: 27, rightAnkle: 28 };
+const POSE_INDEX = { nose: 0, left_eye: 2, right_eye: 5, left_ear: 7, right_ear: 8, left_shoulder: 11, right_shoulder: 12, left_elbow: 13, right_elbow: 14, left_wrist: 15, right_wrist: 16, left_hip: 23, right_hip: 24, left_knee: 25, right_knee: 26, left_ankle: 27, right_ankle: 28, left_heel: 29, right_heel: 30, left_foot_index: 31, right_foot_index: 32 };
 
 function clamp(value) { return Math.max(0, Math.min(1, value)); }
-function loadImage(source) {
-  return new Promise((resolve, reject) => { const image = new Image(); image.onload = () => resolve(image); image.onerror = () => reject(new Error('Unable to decode captured frame.')); image.src = source; });
-}
 function namedLandmarks(landmarks) { return Object.fromEntries(Object.entries(POSE_INDEX).map(([name, index]) => [name, landmarks[index] || null])); }
 function averageVisibility(landmarks) { return landmarks.reduce((total, point) => total + (point.visibility ?? point.presence ?? 0), 0) / landmarks.length; }
 function sharpnessScore(image) {
@@ -40,7 +37,7 @@ function segmentationDetails(result, frameWidth, frameHeight) {
   return { segmentationMaskRef: { width, height, data }, confidence: personConfidenceSum / count, foregroundCoverage: count / data.length, frameDimensions: { width: frameWidth, height: frameHeight }, boundingBox, bodyVisibility: edgeClipping ? .3 : clamp((boundingBox.height - .55) / .25), edgeClipping };
 }
 function estimateOrientation(landmarks, guidedAngle) {
-  const left = landmarks[POSE_INDEX.leftShoulder], right = landmarks[POSE_INDEX.rightShoulder], leftHip = landmarks[POSE_INDEX.leftHip], rightHip = landmarks[POSE_INDEX.rightHip];
+  const left = landmarks[POSE_INDEX.left_shoulder], right = landmarks[POSE_INDEX.right_shoulder], leftHip = landmarks[POSE_INDEX.left_hip], rightHip = landmarks[POSE_INDEX.right_hip];
   if (![left, right, leftHip, rightHip].every(Boolean)) return { orientationDeg: guidedAngle, confidence: 0, source: 'guided checkpoint; pose orientation unavailable' };
   const shoulderWidth = Math.hypot(left.x - right.x, left.y - right.y), hipWidth = Math.hypot(leftHip.x - rightHip.x, leftHip.y - rightHip.y), torso = Math.hypot(((left.x + right.x) - (leftHip.x + rightHip.x)) / 2, ((left.y + right.y) - (leftHip.y + rightHip.y)) / 2);
   const frontality = clamp(((shoulderWidth + hipWidth) / 2) / Math.max(torso, .001));
@@ -68,7 +65,7 @@ class MediaPipeVisionProvider {
   }
   constructor(pose, segmenter) { this.pose = pose; this.segmenter = segmenter; }
   analyzeFrame = async (frame) => {
-    const image = await loadImage(frame.image), poseResult = this.pose.detect(image), segmentationResult = this.segmenter.segment(image);
+    const image = await window.tailorScanImages.loadImage(frame.image), poseResult = this.pose.detect(image), segmentationResult = this.segmenter.segment(image);
     const landmarks = poseResult.landmarks?.[0], worldLandmarks = poseResult.worldLandmarks?.[0];
     if (!landmarks || !worldLandmarks) throw new Error('No reliable body pose was detected.');
     const segmentation = segmentationDetails(segmentationResult, image.naturalWidth, image.naturalHeight), visibility = averageVisibility(landmarks), orientation = estimateOrientation(landmarks, frame.angle), sharpness = sharpnessScore(image);
@@ -76,7 +73,9 @@ class MediaPipeVisionProvider {
     // resolution. Convert it to a blur heuristic before the frame gate rather
     // than treating every normally detailed iPhone frame as severely blurred.
     const motionBlur = clamp(1 - sharpness * 2.2);
-    return { quality: { sharpness, motionBlur, bodyVisibility: segmentation.bodyVisibility, landmarkReliability: visibility, segmentationQuality: segmentation.confidence, occlusion: segmentation.edgeClipping ? 1 : 1 - visibility }, segmentationMaskRef: segmentation.segmentationMaskRef, segmentation, landmarks: namedLandmarks(landmarks), worldLandmarks: namedLandmarks(worldLandmarks), correspondenceKeypoints: namedLandmarks(landmarks), orientationDeg: orientation.orientationDeg, orientation, stability: null, frameReference: frame.id };
+    const rawPose = window.tailorScanLandmarks.createRawPoseLandmarks({ image_width: image.naturalWidth, image_height: image.naturalHeight, landmarks: namedLandmarks(landmarks), world_landmarks: namedLandmarks(worldLandmarks), frame_id: frame.id, view_id: frame.id });
+    const tailoringLandmarks = window.tailorScanLandmarks.createPoseReferencedTailoringLandmarks(rawPose);
+    return { quality: { sharpness, motionBlur, bodyVisibility: segmentation.bodyVisibility, landmarkReliability: visibility, segmentationQuality: segmentation.confidence, occlusion: segmentation.edgeClipping ? 1 : 1 - visibility }, segmentationMaskRef: segmentation.segmentationMaskRef, segmentation, rawPose, rawShoulderReferences: { raw_left_shoulder: rawPose.landmarks.left_shoulder, raw_right_shoulder: rawPose.landmarks.right_shoulder }, landmarks: rawPose.landmarks, worldLandmarks: rawPose.world_landmarks, correspondenceKeypoints: rawPose.landmarks, tailoringLandmarks, orientationDeg: orientation.orientationDeg, orientation, stability: null, frameReference: frame.id };
   };
 }
 

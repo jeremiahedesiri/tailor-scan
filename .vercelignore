@@ -1,0 +1,9 @@
+# Tailor Scan is served directly from the repository root.
+# Exclude development, historical, and non-Vercel hosting material only.
+.git/
+.openai/
+dist/
+scripts/
+tests/
+tailor-scan-site.tar
+README.md
