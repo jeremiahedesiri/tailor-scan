@@ -1,6 +1,6 @@
 # Tailor Scan MVP
 
-A mobile-first, static prototype for a tailor's measurement workflow. It supports guided front and side capture using the rear camera when available, editable inch measurements, summary review, and local profile saving.
+A mobile-first, static prototype for a tailor's measurement workflow. It supports a short guided 360° video scan using the rear camera when available, editable inch measurements, summary review, and local profile saving.
 
 ## Run
 
@@ -11,6 +11,12 @@ Serve this folder from any static file server, then open `index.html` on a devic
 The app intentionally labels the values as estimates. It does not claim that ordinary 2D phone images yield reliable tailoring measurements. Actual height scales length estimates, snug chest anchors upper-body circumferences, and snug hip anchors lower-body circumferences. These inputs create proportional starting estimates only; users should confirm and correct every value manually. The UI/state boundary is prepared for a future landmark/3D engine to replace the defaults with derived estimates.
 
 ## Multi-view vision and reconstruction status
+
+### Continuous 360° video capture
+
+The preferred flow records a short continuous rear-camera scan (a 10–20 second slow turn is guidance, not a requirement). While recording, the browser samples a lightweight candidate image about every 650 ms, capped at 42 candidates. After the user presses **Finish Scan**, Tailor Scan releases the camera, analyzes those candidates with the existing MediaPipe pipeline, rejects weak/duplicate views, and sends only the selected representative frames (up to 20, target range 12–30) into the existing reconstruction flow.
+
+The 0°–360° indicator is a guided time/progression prior, not a claimed vision-derived absolute azimuth. Scan acceptance still requires front, both sides, back, intermediate views, usable body visibility, segmentation, and pose results. Automatic stop is deliberately not enabled yet: a user presses **Finish Scan** after the full turn because elapsed time alone is not reliable coverage evidence. MediaRecorder is used where available to create a temporary recording, but the app does not retain it after useful frame extraction; live-frame sampling remains available on browsers without MediaRecorder. The older photo-checkpoint flow remains as an explicit fallback.
 
 The browser loads `@mediapipe/tasks-vision` from jsDelivr for on-device person segmentation and Pose Landmarker inference. The provider records the real segmentation confidence mask, frame bounds, pose landmarks, pose world landmarks, and semantic pose-index correspondence keys for representative 360-degree frames. The package is Apache-2.0 and the official Selfie Segmenter model card is Apache-2.0. The Pose Landmarker task asset is loaded from its official MediaPipe URL, but its exact pinned model-asset terms must be verified and recorded before commercial distribution; the implementation is deliberately isolated behind `vision-provider.js` for that reason.
 

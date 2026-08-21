@@ -61,13 +61,16 @@ const rotationStages = [
   { id: 'frontLeft', angle: 315, instruction: 'Continue through an intermediate front-left view.' },
   { id: 'complete', angle: 360, instruction: 'Complete the turn facing the camera again. Capture the final view to finish coverage.' }
 ];
-const rotationSelectionConfig = Object.freeze({ minQualityScore: .68, minAngularSeparation: 20, maxSelectedFrames: 12, cardinalTolerance: 25, minIntermediateFrames: 2 });
+const rotationSelectionConfig = Object.freeze({ minQualityScore: .68, minAngularSeparation: 20, maxSelectedFrames: 20, cardinalTolerance: 25, minIntermediateFrames: 2 });
+// Duration is only a guidance prior, never a completion rule.  The final scan is
+// accepted solely after vision-based quality and angular-coverage checks.
+const videoCaptureConfig = Object.freeze({ targetDurationMs: 15000, minimumDurationMs: 6000, frameSampleIntervalMs: 650, maxCandidateFrames: 42, targetRepresentativeFrames: 20 });
 const regionalScalingPolicy = Object.freeze({ minimumGeometryConfidence: .6, maximumRelativeScaleDeviation: .3 });
 const kingDraftMeasurementMap = Object.freeze([
   ['height', 'height'], ['chest', 'chest'], ['waist', 'waist'], ['hip', 'hip'], ['bicep', 'bicep'], ['calf', 'calf'],
   ['shoulder_to_waist', 'shoulderToWaist'], ['sleeve_length', 'sleeve'], ['trouser_length', 'trouserLength'], ['inseam', 'inseam'], ['outseam', 'outseam']
 ]);
-const state = { values: Object.fromEntries(measurements.map(([name]) => [name, null])), calibration: {}, circumferenceConstraints: {}, reconstruction: { landmarks: {}, rawBodyHeight: null, rawLinearMeasurements: {}, rawCircumferences: {}, globalPhysicalScale: null, rawGeometry: null, refinedGeometry: null, multiViewSession: null, refinementStatus: 'awaiting editable 3D reconstruction' }, captures: {}, rotationCaptures: {}, rotationCandidates: [], representativeFrames: [], rotationCoverage: null, rotationIndex: 0, skippedCapture: {}, stream: null, activeGroup: 'core' };
+const state = { values: Object.fromEntries(measurements.map(([name]) => [name, null])), calibration: {}, circumferenceConstraints: {}, reconstruction: { landmarks: {}, rawBodyHeight: null, rawLinearMeasurements: {}, rawCircumferences: {}, globalPhysicalScale: null, rawGeometry: null, refinedGeometry: null, multiViewSession: null, refinementStatus: 'awaiting editable 3D reconstruction' }, captures: {}, rotationCaptures: {}, rotationCandidates: [], representativeFrames: [], rotationCoverage: null, rotationIndex: 0, videoCapture: { mode: 'video', recording: false, processing: false, recorder: null, chunks: [], sampleTimer: null, startedAt: null, candidateCount: 0, blob: null }, skippedCapture: {}, stream: null, activeGroup: 'core' };
 const $ = (selector) => document.querySelector(selector);
 
 function rounded(value) { return units.toInternal(value); }
@@ -269,6 +272,19 @@ function showScreen(id) {
   stopCamera(); window.scrollTo({top: 0, behavior: 'smooth'});
 }
 function stopCamera() { if (state.stream) { state.stream.getTracks().forEach(track => track.stop()); state.stream = null; } }
+function guidedVideoAngle(elapsedMs, config = videoCaptureConfig) { return Math.min(359, Math.max(0, (elapsedMs / config.targetDurationMs) * 360)); }
+function videoElapsedMs(now = performance.now()) { return state.videoCapture.startedAt == null ? 0 : Math.max(0, now - state.videoCapture.startedAt); }
+function stopVideoFrameSampling() {
+  if (state.videoCapture.sampleTimer != null) window.clearInterval(state.videoCapture.sampleTimer);
+  state.videoCapture.sampleTimer = null;
+}
+function clearVideoCaptureBuffers() {
+  stopVideoFrameSampling();
+  state.videoCapture.chunks = [];
+  state.videoCapture.blob = null;
+  state.videoCapture.recorder = null;
+  state.videoCapture.startedAt = null;
+}
 function normalizedAngle(angle) { return ((angle % 360) + 360) % 360; }
 function angularDistance(first, second) { const difference = Math.abs(normalizedAngle(first) - normalizedAngle(second)); return Math.min(difference, 360 - difference); }
 function frameQualityScore(quality) {
@@ -472,14 +488,36 @@ async function prepareMultiViewReconstruction() {
 }
 function hasSufficientRotationCoverage() { return rotationStages.every(stage => Boolean(state.rotationCaptures[stage.id])); }
 function rotationProgress() { return Math.round((Object.keys(state.rotationCaptures).length / rotationStages.length) * 100); }
+function videoProgress() { return Math.min(99, Math.round((guidedVideoAngle(videoElapsedMs()) / 360) * 100)); }
 function renderRotationStage() {
   const stage = rotationStages[state.rotationIndex] || rotationStages[rotationStages.length - 1];
-  $('#rotationInstruction').textContent = stage.instruction;
-  const qualityStatus = state.rotationCoverage?.status || 'quality validation awaiting vision analysis';
+  const videoMode = state.videoCapture.mode === 'video';
+  const recording = state.videoCapture.recording;
+  const processing = state.videoCapture.processing;
+  const qualityStatus = state.rotationCoverage?.status || 'quality validation will run after recording';
   const reconstructionStatus = state.reconstruction.multiViewSession?.status;
+  if (videoMode) {
+    const guidedAngle = guidedVideoAngle(videoElapsedMs());
+    $('#rotationInstruction').textContent = processing ? 'Processing the recording. Tailor Scan is choosing sharp, complete body views for reconstruction.' : (recording ? 'Recording: rotate slowly, stay upright, and keep your full body, hands, and feet inside the guide.' : 'Position the phone, then press Start 360 Scan. Stand naturally with arms slightly away from your torso.');
+    $('#rotationStatus').textContent = processing ? `Processing Scan — ${qualityStatus}.` : (recording ? `Recording 360° Scan. Guided rotation estimate: ${Math.round(guidedAngle)}°. ${state.rotationCandidates.length} candidate frames sampled. Finish after one full turn.` : (state.rotationCoverage?.sufficient ? `Representative-frame coverage is sufficient. ${reconstructionStatus || 'Ready to review.'}` : 'A short 10–20 second turn is a guide only. Coverage, visibility, and frame quality decide whether the scan is accepted.'));
+    document.querySelectorAll('[data-rotation-stage]').forEach(point => {
+      const milestone = Number(point.dataset.rotationStage === 'front' ? 0 : rotationStages.find(item => item.id === point.dataset.rotationStage)?.angle || 360);
+      point.classList.toggle('captured', recording ? guidedAngle >= milestone : (state.rotationCoverage?.sufficient && milestone < 360));
+    });
+    $('#rotationRetake').hidden = true;
+    $('#rotationManual').hidden = recording || processing;
+    $('#rotationManual').textContent = 'Use photo checkpoints instead';
+    $('#rotationCapture').disabled = processing;
+    $('#rotationCapture').textContent = processing ? 'Processing Scan' : (state.rotationCoverage?.sufficient && !recording ? 'Continue to measurements' : (recording ? 'Finish Scan' : (state.stream ? 'Start 360 Scan' : 'Open rear camera')));
+    return;
+  }
+  $('#rotationInstruction').textContent = stage.instruction;
   $('#rotationStatus').textContent = hasSufficientRotationCoverage() ? `All guided viewpoints captured. Representative-frame assessment: ${qualityStatus}. ${reconstructionStatus || ''}`.trim() : `${rotationProgress()}% guided coverage captured. Next: ${stage.angle}° ${stage.id === 'complete' ? 'turn completion' : stage.id} view.`;
   document.querySelectorAll('[data-rotation-stage]').forEach(point => point.classList.toggle('captured', Boolean(state.rotationCaptures[point.dataset.rotationStage])));
   $('#rotationRetake').hidden = state.rotationIndex === 0;
+  $('#rotationManual').hidden = false;
+  $('#rotationManual').textContent = 'Use continuous video instead';
+  $('#rotationCapture').disabled = false;
   $('#rotationCapture').textContent = hasSufficientRotationCoverage() ? 'Continue to measurements' : state.stream ? `Capture ${stage.angle}° view` : 'Open rear camera';
 }
 async function openRotationCamera() {
@@ -507,12 +545,83 @@ function captureRotationView() {
   if (state.rotationIndex < rotationStages.length - 1) state.rotationIndex += 1;
   renderRotationStage();
 }
+function sampleRotationVideoFrame() {
+  const video = $('#scan360Video');
+  if (!state.videoCapture.recording || !video || video.readyState < 2 || state.rotationCandidates.length >= videoCaptureConfig.maxCandidateFrames) return false;
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth || 640; canvas.height = video.videoHeight || 960;
+  canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+  addRotationCandidateFrame({ angle: guidedVideoAngle(videoElapsedMs()), capturedAt: new Date().toISOString(), image: canvas.toDataURL('image/jpeg', .82), quality: null, source: 'continuous-video-sample', sampleIndex: state.videoCapture.candidateCount++ });
+  return true;
+}
+function supportedVideoMimeType() {
+  if (!window.MediaRecorder?.isTypeSupported) return null;
+  return ['video/mp4;codecs=avc1', 'video/webm;codecs=vp9', 'video/webm'].find(type => window.MediaRecorder.isTypeSupported(type)) || null;
+}
+function startRotationVideoCapture() {
+  if (!state.stream || state.videoCapture.recording) return;
+  state.videoCapture.recording = true;
+  state.videoCapture.startedAt = performance.now();
+  state.videoCapture.chunks = [];
+  if (window.MediaRecorder) {
+    try {
+      const mimeType = supportedVideoMimeType();
+      const recorder = new MediaRecorder(state.stream, mimeType ? { mimeType } : undefined);
+      recorder.ondataavailable = event => { if (event.data?.size) state.videoCapture.chunks.push(event.data); };
+      recorder.onstop = () => { state.videoCapture.blob = state.videoCapture.chunks.length ? new Blob(state.videoCapture.chunks, { type: recorder.mimeType || 'video/webm' }) : null; };
+      recorder.start(1000);
+      state.videoCapture.recorder = recorder;
+    } catch (error) { toast('Video file recording is unavailable here; frames will still be sampled from the live camera.'); }
+  }
+  sampleRotationVideoFrame();
+  state.videoCapture.sampleTimer = window.setInterval(() => { sampleRotationVideoFrame(); renderRotationStage(); }, videoCaptureConfig.frameSampleIntervalMs);
+  renderRotationStage();
+}
+async function finishRotationVideoCapture() {
+  if (!state.videoCapture.recording) return;
+  sampleRotationVideoFrame();
+  state.videoCapture.recording = false;
+  stopVideoFrameSampling();
+  const recorder = state.videoCapture.recorder;
+  if (recorder?.state && recorder.state !== 'inactive') {
+    await new Promise(resolve => { recorder.addEventListener('stop', resolve, { once: true }); recorder.stop(); });
+  }
+  stopCamera();
+  state.videoCapture.processing = true;
+  renderRotationStage();
+  try { await analyzeRotationCandidatesWithVision(); }
+  finally {
+    state.videoCapture.processing = false;
+    // Representative JPEG frames have been retained. The raw recording and
+    // MediaRecorder chunks are deliberately released to limit device storage.
+    clearVideoCaptureBuffers();
+    renderRotationStage();
+  }
+}
 function handleRotationCapture() {
+  if (state.videoCapture.mode === 'video') {
+    if (state.videoCapture.processing) return;
+    if (state.rotationCoverage?.sufficient && !state.videoCapture.recording) { showScreen('review'); return; }
+    if (state.videoCapture.recording) { finishRotationVideoCapture(); return; }
+    if (state.stream) { startRotationVideoCapture(); return; }
+    openRotationCamera();
+    return;
+  }
   if (hasSufficientRotationCoverage()) { showScreen('review'); return; }
   if (state.stream) { captureRotationView(); return; }
   openRotationCamera();
 }
 function resetRotationCapture() {
+  stopVideoFrameSampling();
+  if (state.videoCapture.recorder?.state && state.videoCapture.recorder.state !== 'inactive') {
+    // Reset must not let a delayed MediaRecorder `onstop` repopulate buffers
+    // that have just been released for a new scan.
+    state.videoCapture.recorder.ondataavailable = null;
+    state.videoCapture.recorder.onstop = null;
+    state.videoCapture.recorder.stop();
+  }
+  clearVideoCaptureBuffers();
+  state.videoCapture.recording = false; state.videoCapture.processing = false; state.videoCapture.candidateCount = 0;
   state.rotationCaptures = {}; state.rotationCandidates = []; state.representativeFrames = [];
   state.values = Object.fromEntries(measurements.map(([name]) => [name, null]));
   // A new capture must never inherit a previous person's raw or refined mesh.
@@ -572,7 +681,13 @@ $('#sideCapture').addEventListener('click', () => handleCapture('side'));
 $('#frontRetake').addEventListener('click', () => { state.captures.front = null; state.skippedCapture.front = false; openCamera('front'); });
 $('#rotationCapture').addEventListener('click', handleRotationCapture);
 $('#rotationRetake').addEventListener('click', retakePreviousRotationView);
+$('#rotationManual').addEventListener('click', () => {
+  if (state.videoCapture.recording || state.videoCapture.processing) return;
+  stopCamera();
+  state.videoCapture.mode = state.videoCapture.mode === 'video' ? 'manual' : 'video';
+  resetRotationCapture();
+});
 document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => { state.activeGroup = tab.dataset.group; document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t === tab)); renderMeasurements(); }));
 $('#summaryButton').addEventListener('click', () => showScreen('summary'));
 $('#saveButton').addEventListener('click', () => { const profiles = JSON.parse(localStorage.getItem('tailorScanProfiles') || '[]'); const name = $('#profileName').value.trim() || 'Unnamed client'; profiles.unshift({id: Date.now(), name, values: state.values, calibration: state.calibration, circumferenceConstraints: state.circumferenceConstraints, reconstruction: {globalPhysicalScale: state.reconstruction.globalPhysicalScale, refinementStatus: state.reconstruction.refinementStatus}, kingDraftMeasurementOutput: buildKingDraftMeasurementOutput(), savedAt: new Date().toISOString()}); localStorage.setItem('tailorScanProfiles', JSON.stringify(profiles)); toast(`${name}'s profile saved on this device.`); });
-window.tailorScan = Object.freeze({ buildKingDraftMeasurementOutput });
+window.tailorScan = Object.freeze({ buildKingDraftMeasurementOutput, guidedVideoAngle, videoCaptureConfig });
